@@ -1,67 +1,112 @@
 import os
-import re
-import json
 import pandas as pd
-import numpy as np
-import asyncio
-from functools import partial
 import twitterscraper as tws
 from IPython.core.debugger import set_trace
-from tqdm import tqdm_notebook
-from konlpy.tag import Okt
-from multiprocessing import Pool, Process
+from tqdm import tqdm_notebook, tqdm
+from multiprocessing import Process, Pool, Queue
+
+
+def _pretty(queried, what):
+    return [{k:v for k,v in qrd.__dict__.items() if k in what} for qrd in queried]
+    
+    
+def _period(start=None, end=None):
+    if start is None: start = '2010-01-01'
+    if end is None: end = pd.Timestamp.today()
+
+    return pd.Timestamp(start).date(), pd.Timestamp(end).date()
+    
+    
+def _scrap(item, q, lang, start, end, what, fname):
+    try:
+        queried = tws.query_tweets(q, lang=lang, begindate=start, enddate=end)
+        res = _pretty(queried, what)
+
+        df = pd.DataFrame(res)
+        df.columns = pd.MultiIndex.from_arrays([[item]*len(df.columns), df.columns])
+        df.to_pickle(fname.format(item=item))
+
+    except:
+        pass
+        #rr.append(item)
+        
+    #finally:
+    #    pbar.update(1)
+        
+        
+
+        
+def scrap2(qry_dict, lang=None, start=None, end=None, what=None, download_to=None):
+    if what is None:
+        what = ['id', 'fullname', 'likes', 'replies', 'retweets', 'text', 'timestamp', 'user']
+
+    if not os.path.exists(download_to):
+        os.makedirs(download_to)
+
+    start, end = _period(start=start, end=end)
+    fname = download_to + '/{item} (' + str(start).replace('-','.') + '-' + str(end).replace('-','.') + ').pkl'
+    
+    pool = Pool()
+    for item, q in qry_dict.items():
+        pool.apply_async(_scrap, args=(item, q, lang, start, end, what, fname))
+        
+    pool.close()
+    pool.join()
+        
+        
+        
+def scrap(qry_dict, lang=None, start=None, end=None, what=None, download_to=None):
+       
+    if what is None:
+        what = ['id', 'fullname', 'likes', 'replies', 'retweets', 'text', 'timestamp', 'user']
+
+    if not os.path.exists(download_to):
+        os.makedirs(download_to)
+
+    start, end = _period(start=start, end=end)
+    fname = download_to + '/{item} (' + str(start).replace('-','.') + '-' + str(end).replace('-','.') + ').pkl'
+    err_item = []
+
+    procs = []
+    for item, q in qry_dict.items():
+        proc = Process(target=_scrap, args=(item, q, lang, start, end, what, fname))
+        procs.append(proc)
+        proc.start()
+
+    for proc in procs:
+        proc.join()
+          
+        
+        
+    return err_item
 
 
 
-def preproc(text, url=True, mention=True, hashtag=True, remove=True):
-    LINEBREAK = r'\n' # str.replace에서는 r'\n'으로 검색이 안된다
-    RT = ' rt '
-    EMOJI = r'[\U00010000-\U0010ffff]'
-    
-    #URL = r'(?P<url>(https?://)?(www[.])?[^ \u3131-\u3163\uac00-\ud7a3]+[.][a-z]{2,6}\b([^ \u3131-\u3163\uac00-\ud7a3]*))'
-    URL = r'(?:https?:\/\/)?(?:www[.])?[^ :\u3131-\u3163\uac00-\ud7a3]+[.][a-z]{2,6}\b(?:[^ \u3131-\u3163\uac00-\ud7a3]*)'
-    # \u3131-\u3163\uac00-\ud7a3 는 한글을 의미함
-    HASHTAG = r'(#[^ #@]+)'
-    MENTION = r'(@[^ #@]+)' 
-    
-    PTNS = '|'.join((LINEBREAK, RT, URL, HASHTAG, MENTION, EMOJI))
-    
-    out = {}
-    text = re.sub('|'.join((LINEBREAK,RT)), '', text.lower())
-    
-    if url:
-        urls = re.findall(URL, text) #[m.groupdict()['url'] for m in re.finditer(URL, text)]
-        urls = [url.replace('\xa0', '') for url in urls]
-        out['urls'] = urls
-        
-    if hashtag:
-        hashtags = re.findall(HASHTAG, text)
-        out['hashtags'] = [h[1:] for h in hashtags]
-        
-    if mention:
-        mentions = re.findall(MENTION, text)
-        out['mention'] = [m[1:] for m in mentions]
-        
-    if remove:    
-        text = re.sub(PTNS, '', text)
-        
-    out['text'] = text.strip()
-    return out
+def scrap(qry_dict, lang=None, start=None, end=None, what=None, download_to=None):
+    if what is None:
+        what = ['id', 'fullname', 'likes', 'replies', 'retweets', 'text', 'timestamp', 'user']
 
-tagger = Okt()
-def tokenize(file):
-    df = pd.read_pickle(file).droplevel(0, axis=1)
-    tokenized = []
+    if not os.path.exists(download_to):
+        os.makedirs(download_to)
+
+    start, end = _period(start=start, end=end)
+    fname = download_to + '/{item} (' + str(start).replace('-','.') + '-' + str(end).replace('-','.') + ').pkl'
+    err_item = []
+
+    def _scrap(item, q):
+        try:
+            queried = tws.query_tweets(q, lang=lang, begindate=start, enddate=end)
+            res = _pretty(queried, what)
+
+            df = pd.DataFrame(res)
+            df.columns = pd.MultiIndex.from_arrays([[item]*len(df.columns), df.columns])
+            df.to_pickle(fname.format(item=item))
+
+        except:
+            err_item.append(item)
+
     
-    for doc in tqdm_notebook(df.text.iloc[:]):
-        preprocessed = preproc(doc)
-        text, hashtags = preprocessed['text'], preprocessed['hashtags']
-        text += ' ' + ' '.join(hashtags)
-        _tokenized = [t[0] for t in tagger.pos(text, norm=True, stem=True) if t[1] not in ['Punctuation', 'Josa']]
-        tokenized.append(_tokenized)
-    
-    out = df[['id']].copy()
-    
-    #df['brand'] = file.split('.')[0]
-    out['tokenized'] = tokenized
-    return out
+    for item, q in tqdm_notebook(qry_dict.items()):
+        _scrap(item, q)
+        
+    return err_item    
