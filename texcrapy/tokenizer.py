@@ -2,6 +2,7 @@ import pandas as pd
 import re
 
 from tqdm import tqdm_notebook
+from nltk.tag import untag
 # from dask import compute, delayed
 # import dask.threaded
 # import dask.multiprocessing
@@ -33,38 +34,46 @@ def preproc(text, remove_url=True, remove_mention=True, remove_hashtag=False):
     text = re.sub('|'.join((LINEBREAK, RT, EMOJI, DOTS)), '', text.lower())
     
     if remove_url:
-        text = re.sub(URL, '', text)
+        text = re.sub(URL, ' ', text)
 
     if remove_mention:
-        text = re.sub(MENTION, '', text)        
+        text = re.sub(MENTION, ' ', text)        
     else:
         text = re.sub(MENTION, ' \g<inner_mention>', text)
         
     if remove_hashtag:
-        text = re.sub(HASHTAG, '', text)
+        text = re.sub(HASHTAG, ' ', text)
     else:
         text = re.sub(HASHTAG, ' \g<inner_hashtag>', text)
         
     return re.sub(LONG_BLANK, ' ', text).strip()
 
 
-def tokenize_doc(doc, textkey=None, stop_pos=None, with_pos=False, tagger=None):
+def tokenize_doc(doc, textkey=None, stopdoc=None, with_pos=False, tagger=None):
     if textkey is None:
         textkey = 'text'
-        
-    if stop_pos is None:
-        stop_pos = ['Punctuation', 'Josa', 'KoreanParticle', 'Foreign', 'Exclamation']
-        
-    text = preproc(doc[textkey])
+       
+    _text = doc[textkey]
+    if any(d in _text for d in stopdoc):
+        return None
     
-    if with_pos:
-        return [t for t in tagger.pos(text, norm=True, stem=True) if t[1] not in stop_pos]
     else:
-        return [t[0] for t in tagger.pos(text, norm=True, stem=True) if t[1] not in stop_pos]
-        
+        text = preproc(_text)
+        toks = [(tok[0].replace(' - ', ''),tok[1]) for tok in tagger.pos(text)]
+
+        return (toks if with_pos else untag(toks)), text
+            
     
-def tokenize_docs(*docs, textkey=None, stop_pos=None, with_pos=False, tagger=None):
+def tokenize_docs(*docs, textkey=None, stopdoc=None, with_pos=False, tagger=None):
     #values = [delayed(tokenize_doc)(doc, textkey=textkey, stop_pos=stop_pos, with_pos=with_pos, tagger=tagger) for doc in docs]
     #return compute(*values, scheduler='processes')
-       
-    return [tokenize_doc(doc, textkey=textkey, stop_pos=stop_pos, with_pos=with_pos, tagger=tagger) for doc in tqdm_notebook(docs)]
+        
+    #return [tokenize_doc(doc, textkey=textkey, stopdoc=stopdoc, with_pos=with_pos, tagger=tagger) for doc in tqdm_notebook(docs)]
+
+    tok_docs = []
+    for doc in tqdm_notebook(docs):
+        tok_doc = tokenize_doc(doc, textkey=textkey, stopdoc=stopdoc, with_pos=with_pos, tagger=tagger)
+        if tok_doc is not None:
+            tok_docs.append(tok_doc)
+            
+    return tok_docs
