@@ -77,3 +77,27 @@ def tokenize_docs(*docs, textkey=None, stopdoc=None, with_pos=False, tagger=None
             tok_docs.append(tok_doc)
             
     return tok_docs
+
+
+
+def prime_factor(value):
+    print(value)
+    
+    factors = []
+    for divisor in range(2, value-1):
+        quotient, remainder = divmod(value, divisor)
+        if not remainder:
+            factors.extend(prime_factor(divisor))
+            factors.extend(prime_factor(quotient))
+            break
+        else:
+            factors = [value]
+    return factors
+
+
+def test(value, tagger):
+    #from konlpy.tag import Twitter
+    #tag = Twitter()
+    #import jpype
+    #jpype.attachThreadToJVM()
+    return __name__ #value, tagger.pos("안녕하세요")
